@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Basic AI Chatbot</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:40px;max-width:680px}
+    #log{border:1px solid #ddd;border-radius:8px;padding:12px;height:380px;overflow:auto;white-space:pre-wrap;background:#fafafa}
+    .msg{margin:8px 0}
+    .you{color:#333}
+    .bot{color:#0b74de}
+    form{display:flex;gap:8px;margin-top:12px}
+    input{flex:1;padding:10px;border:1px solid #ddd;border-radius:8px}
+    button{padding:10px 16px;border:0;border-radius:8px;background:#0b74de;color:#fff;cursor:pointer}
+    button:disabled{opacity:.6;cursor:not-allowed}
+  </style>
+</head>
+<body>
+  <h1>Basic AI Chatbot</h1>
+  <div id="log" aria-live="polite"></div>
+  <form id="f">
+    <input id="q" placeholder="Say hi…" autocomplete="off"/>
+    <button id="send" type="submit">Send</button>
+  </form>
+
+  <script>
+    const log = document.getElementById('log');
+    const form = document.getElementById('f');
+    const q = document.getElementById('q');
+    const btn = document.getElementById('send');
+
+    function add(kind, text){
+      const div=document.createElement('div');
+      div.className='msg '+kind;
+      div.textContent=(kind==='you'?'You: ':'Bot: ')+text;
+      log.appendChild(div);
+      log.scrollTop=log.scrollHeight;
+    }
+
+    form.onsubmit = async (e)=>{
+      e.preventDefault();
+      const msg = q.value.trim();
+      if(!msg) return;
+      add('you', msg);
+      q.value='';
+      btn.disabled=true;
+
+      try{
+        const res = await fetch('http://127.0.0.1:8000/chat', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({message: msg})
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data?.detail || res.statusText);
+        add('bot', data.reply || '…');
+      }catch(err){
+        add('bot', 'Error: '+(err.message||'request failed'));
+      }finally{
+        btn.disabled=false;
+        q.focus();
+      }
+    };
+  </script>
+</body>
+</html>

@@ -2,40 +2,79 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Basic AI Chatbot</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>AI Chatbot + YouTube</title>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:40px;max-width:680px}
-    #log{border:1px solid #ddd;border-radius:8px;padding:12px;height:380px;overflow:auto;white-space:pre-wrap;background:#fafafa}
-    .msg{margin:8px 0}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:40px;max-width:760px}
+    #banner{padding:10px 12px;border:1px solid #ddd;background:#f7fbff;border-radius:8px;margin-bottom:16px;display:none}
+    #log{border:1px solid #ddd;border-radius:8px;padding:12px;height:440px;overflow:auto;white-space:pre-wrap;background:#fafafa}
+    .msg{margin:10px 0}
     .you{color:#333}
     .bot{color:#0b74de}
+    .cit{font-size:12px;color:#666;margin-top:6px;padding-left:8px;border-left:3px solid #eee}
     form{display:flex;gap:8px;margin-top:12px}
     input{flex:1;padding:10px;border:1px solid #ddd;border-radius:8px}
     button{padding:10px 16px;border:0;border-radius:8px;background:#0b74de;color:#fff;cursor:pointer}
     button:disabled{opacity:.6;cursor:not-allowed}
+    .small{font-size:12px;color:#666;margin-left:6px}
   </style>
 </head>
 <body>
-  <h1>Basic AI Chatbot</h1>
+  <h1>AI Chatbot + YouTube</h1>
+
+  <div id="banner"></div>
+
   <div id="log" aria-live="polite"></div>
   <form id="f">
-    <input id="q" placeholder="Say hi…" autocomplete="off"/>
+    <input id="q" placeholder="Paste a YouTube URL or just ask a question…" autocomplete="off"/>
     <button id="send" type="submit">Send</button>
   </form>
+  <div class="small">Tip：粘贴 YouTube 链接后会自动拉取字幕并总结；随后提问将基于字幕做问答并给出时间戳引用。</div>
 
   <script>
+    const API = 'http://127.0.0.1:8000';
     const log = document.getElementById('log');
     const form = document.getElementById('f');
     const q = document.getElementById('q');
     const btn = document.getElementById('send');
+    const banner = document.getElementById('banner');
 
-    function add(kind, text){
+    let currentVideo = null; // {id, title}
+
+    function add(kind, text, citations){
       const div=document.createElement('div');
       div.className='msg '+kind;
       div.textContent=(kind==='you'?'You: ':'Bot: ')+text;
       log.appendChild(div);
+      if (citations && citations.length){
+        citations.slice(0,6).forEach(c=>{
+          const cdiv=document.createElement('div');
+          cdiv.className='cit';
+          cdiv.textContent=`[${c.time}] ${c.text}`;
+          log.appendChild(cdiv);
+        });
+      }
       log.scrollTop=log.scrollHeight;
+    }
+
+    function isYouTubeUrl(s){
+      return /(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}/i.test(s.trim());
+    }
+
+    function setBanner(video){
+      if (video){
+        currentVideo = video;
+        banner.style.display='block';
+        banner.innerHTML = `
+          <b>Video loaded:</b> ${video.title ? video.title : '(No Title)'}
+          <span class="small"> (video mode ON)</span><br/>
+          <span class="small">后续问题将基于字幕回答，并附带时间戳引用。</span>
+        `;
+      } else {
+        currentVideo = null;
+        banner.style.display='none';
+        banner.textContent = '';
+      }
     }
 
     form.onsubmit = async (e)=>{
@@ -47,14 +86,36 @@
       btn.disabled=true;
 
       try{
-        const res = await fetch('http://127.0.0.1:8000/chat', {
+        // 如果处于“视频模式”，且不是 URL，本次走 /video_qa
+        if (currentVideo && !isYouTubeUrl(msg)){
+          const res = await fetch(`${API}/video_qa`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({video_id: currentVideo.id, question: msg})
+          });
+          const data = await res.json();
+          if(!res.ok) throw new Error(data?.detail || res.statusText);
+          add('bot', data.reply || '…', data.citations);
+          // video_qa 维持当前 video，不清空
+          return;
+        }
+
+        // 否则，走 /chat（既支持普通聊天，也支持粘贴 URL 的总结）
+        const res = await fetch(`${API}/chat`, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({message: msg})
         });
         const data = await res.json();
         if(!res.ok) throw new Error(data?.detail || res.statusText);
-        add('bot', data.reply || '…');
+
+        add('bot', data.reply || '…', data.citations);
+
+        if (data.kind === 'video_summary' && data.video){
+          setBanner(data.video);  // 进入“视频模式”
+        } else if (data.kind === 'text'){
+          // 普通聊天不会进入视频模式
+        }
       }catch(err){
         add('bot', 'Error: '+(err.message||'request failed'));
       }finally{
